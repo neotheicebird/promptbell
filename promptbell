@@ -1,0 +1,237 @@
+#!/usr/bin/env sh
+set -eu
+
+APP_NAME="promptbell"
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/promptbell"
+SOUND_FILE="$STATE_DIR/sound"
+
+KEYWORDS="allow|confirm|continue|y/n|approve"
+COOLDOWN=3
+
+mkdir -p "$STATE_DIR"
+
+# ---------------------------
+# Sound handling
+# ---------------------------
+
+current_sound() {
+  if [ -f "$SOUND_FILE" ]; then
+    cat "$SOUND_FILE"
+  else
+    echo "default"
+  fi
+}
+
+play_sound() {
+  SOUND="$(current_sound)"
+
+  case "$SOUND" in
+    none)
+      return
+      ;;
+    default)
+      if command -v afplay >/dev/null 2>&1; then
+        afplay /System/Library/Sounds/Glass.aiff &
+      elif command -v paplay >/dev/null 2>&1; then
+        paplay /usr/share/sounds/freedesktop/stereo/complete.oga &
+      fi
+      ;;
+    glass)
+      afplay /System/Library/Sounds/Glass.aiff &
+      ;;
+    ping)
+      afplay /System/Library/Sounds/Ping.aiff &
+      ;;
+    pop)
+      afplay /System/Library/Sounds/Pop.aiff &
+      ;;
+    bell)
+      paplay /usr/share/sounds/freedesktop/stereo/bell.oga &
+      ;;
+  esac
+}
+
+notify() {
+  if command -v osascript >/dev/null 2>&1; then
+    osascript -e 'display notification "A command needs your attention" with title "promptbell"' &
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "promptbell" "A command needs your attention" &
+  fi
+}
+
+alert() {
+  now=$(date +%s)
+  if [ $((now - LAST_ALERT)) -lt "$COOLDOWN" ]; then
+    return
+  fi
+
+  LAST_ALERT="$now"
+  play_sound
+  notify
+}
+
+# ---------------------------
+# Sounds subcommand
+# ---------------------------
+
+sounds_list() {
+  cat <<EOF
+Available sounds:
+  default  (system default)
+  glass    (macOS)
+  ping     (macOS)
+  pop      (macOS)
+  bell     (Linux)
+  none     (disable sound)
+EOF
+}
+
+sounds_use() {
+  case "${1:-}" in
+    default|glass|ping|pop|bell|none)
+      echo "$1" >"$SOUND_FILE"
+      echo "🔔 promptbell sound set to '$1'"
+      ;;
+    *)
+      echo "Unknown sound: ${1:-}"
+      echo "Run: promptbell sounds list"
+      exit 1
+      ;;
+  esac
+}
+
+# ---------------------------
+# Shell integration
+# ---------------------------
+
+install_shell() {
+  SHELL_NAME=$(basename "${SHELL:-}")
+  case "$SHELL_NAME" in
+    zsh) RC="$HOME/.zshrc" ;;
+    bash) RC="$HOME/.bashrc" ;;
+    *)
+      echo "Unsupported shell: $SHELL_NAME"
+      exit 1
+      ;;
+  esac
+
+  if grep -q "promptbell integration" "$RC" 2>/dev/null; then
+    echo "promptbell is already installed"
+    exit 0
+  fi
+
+  cat >>"$RC" <<'EOF'
+
+# --- promptbell integration (start) ---
+_promptbell_notice() {
+  if [ -t 1 ]; then
+    printf '%s\n' "🔔 Notification sounds by promptbell. Disable or remove: promptbell --remove" >&2
+  fi
+}
+
+gemini() {
+  _promptbell_notice
+  promptbell command gemini "$@"
+}
+
+codex() {
+  _promptbell_notice
+  promptbell command codex "$@"
+}
+# --- promptbell integration (end) ---
+
+EOF
+
+  echo "✅ promptbell installed"
+  echo "Restart your terminal or run: source $RC"
+}
+
+remove_shell() {
+  for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    [ -f "$RC" ] || continue
+    sed -i.bak '/promptbell integration (start)/,/promptbell integration (end)/d' "$RC"
+  done
+
+  echo "🧹 promptbell removed"
+  echo "Restart your terminal to fully apply changes"
+}
+
+# ---------------------------
+# CLI routing
+# ---------------------------
+
+case "${1:-}" in
+  --install)
+    install_shell
+    exit 0
+    ;;
+  --remove)
+    remove_shell
+    exit 0
+    ;;
+  sounds)
+    case "${2:-}" in
+      list)
+        sounds_list
+        ;;
+      use)
+        sounds_use "${3:-}"
+        ;;
+      *)
+        echo "Usage:"
+        echo "  promptbell sounds list"
+        echo "  promptbell sounds use <name>"
+        exit 1
+        ;;
+    esac
+    exit 0
+    ;;
+  --help)
+    cat <<EOF
+promptbell — notification sounds for CLI-based AI coding assistants
+
+Usage:
+  promptbell <command> [args...]
+  promptbell --install
+  promptbell --remove
+  promptbell sounds list
+  promptbell sounds use <name>
+  promptbell --help
+
+Description:
+  promptbell plays notification sounds for CLI-based AI coding
+  assistants (like gemini and codex) when user attention is needed.
+
+  After installing shell integration, you can run:
+    gemini
+    codex
+  normally — no need to prefix with promptbell.
+
+Install / Remove:
+  --install   Enable automatic notifications for gemini and codex
+  --remove    Remove shell integration (safe, keeps backups)
+
+Sounds:
+  sounds list         Show available system sounds
+  sounds use <name>   Set the notification sound
+EOF
+    exit 0
+    ;;
+esac
+
+# ---------------------------
+# Command wrapper
+# ---------------------------
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: promptbell <command> [args...]"
+  exit 1
+fi
+
+LAST_ALERT=0
+
+"$@" 2>&1 | while IFS= read -r line; do
+  printf '%s\n' "$line"
+  echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
+done
