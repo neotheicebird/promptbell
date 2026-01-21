@@ -81,6 +81,11 @@ promptbell --remove
 This safely removes the shell integration from `.zshrc` / `.bashrc`
 (backups are kept).
 
+To completely uninstall promptbell:
+
+```bash
+promptbell uninstall
+```
 ---
 
 ## Why promptbell?

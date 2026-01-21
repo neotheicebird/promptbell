@@ -95,7 +95,7 @@ sounds_use() {
 # Shell integration
 # ---------------------------
 
-install_shell() {
+add_shell() {
   SHELL_NAME=$(basename "${SHELL:-}")
   case "$SHELL_NAME" in
     zsh) RC="$HOME/.zshrc" ;;
@@ -143,8 +143,41 @@ remove_shell() {
     sed -i.bak '/promptbell integration (start)/,/promptbell integration (end)/d' "$RC"
   done
 
-  echo "🧹 promptbell removed from shell"
+  echo "🧹 Shell integration removed"
+  echo ""
+  echo "To completely uninstall promptbell:"
+  echo "  promptbell uninstall"
+  echo ""
   echo "Restart your terminal to fully apply changes"
+}
+
+# ---------------------------
+# Uninstall
+# ---------------------------
+
+uninstall_promptbell() {
+  BIN_PATH="$(command -v promptbell || true)"
+
+  if [ -z "$BIN_PATH" ]; then
+    echo "promptbell is not installed"
+    exit 1
+  fi
+
+  echo "This will remove the promptbell binary:"
+  echo "  $BIN_PATH"
+  echo ""
+  printf "Continue? [y/N]: "
+  read -r answer
+
+  case "$answer" in
+    y|Y|yes|YES)
+      rm -f "$BIN_PATH"
+      echo "🗑️  promptbell uninstalled"
+      ;;
+    *)
+      echo "Aborted"
+      ;;
+  esac
 }
 
 # ---------------------------
@@ -153,11 +186,15 @@ remove_shell() {
 
 case "${1:-}" in
   --add)
-    install_shell
+    add_shell
     exit 0
     ;;
   --remove)
     remove_shell
+    exit 0
+    ;;
+  uninstall)
+    uninstall_promptbell
     exit 0
     ;;
   sounds)
@@ -181,6 +218,7 @@ Usage:
   promptbell <command> [args...]
   promptbell --add
   promptbell --remove
+  promptbell uninstall
   promptbell sounds list
   promptbell sounds use <name>
   promptbell --help
@@ -190,8 +228,9 @@ Description:
   assistants (like gemini and codex) when user attention is needed.
 
 Install / Remove:
-  --add      Add promptbell to your shell (automatic notifications)
-  --remove   Remove shell integration (safe, keeps backups)
+  --add        Add promptbell to your shell (automatic notifications)
+  --remove     Remove shell integration (keeps binary)
+  uninstall    Remove the promptbell binary from your system
 EOF
     exit 0
     ;;
