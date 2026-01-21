@@ -18,10 +18,10 @@ No daemons. No background services. Just a small, readable shell script.
 curl -fsSL https://raw.githubusercontent.com/neotheicebird/promptbell/main/install.sh | sh
 ```
 
-Then enable automatic notifications:
+Then add promptbell to your shell:
 
 ```bash
-promptbell --install
+promptbell --add
 ```
 
 Restart your terminal (or run `source ~/.zshrc` / `source ~/.bashrc`).
@@ -44,6 +44,9 @@ Each run prints a short notice so you always know promptbell is active:
 ```
 🔔 Notification sounds by promptbell. Disable or remove: promptbell --remove
 ```
+
+> promptbell preserves rich CLI interfaces (colors, spinners, interactive UI)
+> by running commands in a pseudo-terminal when available.
 
 ---
 

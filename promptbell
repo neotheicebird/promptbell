@@ -27,9 +27,7 @@ play_sound() {
   SOUND="$(current_sound)"
 
   case "$SOUND" in
-    none)
-      return
-      ;;
+    none) return ;;
     default)
       if command -v afplay >/dev/null 2>&1; then
         afplay /System/Library/Sounds/Glass.aiff &
@@ -37,18 +35,10 @@ play_sound() {
         paplay /usr/share/sounds/freedesktop/stereo/complete.oga &
       fi
       ;;
-    glass)
-      afplay /System/Library/Sounds/Glass.aiff &
-      ;;
-    ping)
-      afplay /System/Library/Sounds/Ping.aiff &
-      ;;
-    pop)
-      afplay /System/Library/Sounds/Pop.aiff &
-      ;;
-    bell)
-      paplay /usr/share/sounds/freedesktop/stereo/bell.oga &
-      ;;
+    glass) afplay /System/Library/Sounds/Glass.aiff & ;;
+    ping)  afplay /System/Library/Sounds/Ping.aiff & ;;
+    pop)   afplay /System/Library/Sounds/Pop.aiff & ;;
+    bell)  paplay /usr/share/sounds/freedesktop/stereo/bell.oga & ;;
   esac
 }
 
@@ -117,7 +107,7 @@ install_shell() {
   esac
 
   if grep -q "promptbell integration" "$RC" 2>/dev/null; then
-    echo "promptbell is already installed"
+    echo "promptbell is already added"
     exit 0
   fi
 
@@ -143,7 +133,7 @@ codex() {
 
 EOF
 
-  echo "✅ promptbell installed"
+  echo "✅ promptbell added to shell"
   echo "Restart your terminal or run: source $RC"
 }
 
@@ -153,7 +143,7 @@ remove_shell() {
     sed -i.bak '/promptbell integration (start)/,/promptbell integration (end)/d' "$RC"
   done
 
-  echo "🧹 promptbell removed"
+  echo "🧹 promptbell removed from shell"
   echo "Restart your terminal to fully apply changes"
 }
 
@@ -162,7 +152,7 @@ remove_shell() {
 # ---------------------------
 
 case "${1:-}" in
-  --install)
+  --add)
     install_shell
     exit 0
     ;;
@@ -172,12 +162,8 @@ case "${1:-}" in
     ;;
   sounds)
     case "${2:-}" in
-      list)
-        sounds_list
-        ;;
-      use)
-        sounds_use "${3:-}"
-        ;;
+      list) sounds_list ;;
+      use)  sounds_use "${3:-}" ;;
       *)
         echo "Usage:"
         echo "  promptbell sounds list"
@@ -193,7 +179,7 @@ promptbell — notification sounds for CLI-based AI coding assistants
 
 Usage:
   promptbell <command> [args...]
-  promptbell --install
+  promptbell --add
   promptbell --remove
   promptbell sounds list
   promptbell sounds use <name>
@@ -203,25 +189,16 @@ Description:
   promptbell plays notification sounds for CLI-based AI coding
   assistants (like gemini and codex) when user attention is needed.
 
-  After installing shell integration, you can run:
-    gemini
-    codex
-  normally — no need to prefix with promptbell.
-
 Install / Remove:
-  --install   Enable automatic notifications for gemini and codex
-  --remove    Remove shell integration (safe, keeps backups)
-
-Sounds:
-  sounds list         Show available system sounds
-  sounds use <name>   Set the notification sound
+  --add      Add promptbell to your shell (automatic notifications)
+  --remove   Remove shell integration (safe, keeps backups)
 EOF
     exit 0
     ;;
 esac
 
 # ---------------------------
-# Command wrapper
+# Command wrapper (PTY-aware)
 # ---------------------------
 
 if [ "$#" -eq 0 ]; then
@@ -231,7 +208,16 @@ fi
 
 LAST_ALERT=0
 
-"$@" 2>&1 | while IFS= read -r line; do
-  printf '%s\n' "$line"
-  echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
-done
+if command -v script >/dev/null 2>&1; then
+  # PTY mode — preserves rich CLI UI
+  script -q /dev/null "$@" 2>&1 | while IFS= read -r line; do
+    printf '%s\n' "$line"
+    echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
+  done
+else
+  # Fallback pipe mode
+  "$@" 2>&1 | while IFS= read -r line; do
+    printf '%s\n' "$line"
+    echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
+  done
+fi
