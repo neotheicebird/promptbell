@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO_RAW_URL="https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/promptbell/main/promptbell"
+REPO_RAW_URL="https://raw.githubusercontent.com/neotheicebird/promptbell/main/promptbell"
 BIN_DIR="/usr/local/bin"
 
 echo "Installing promptbell to $BIN_DIR..."
