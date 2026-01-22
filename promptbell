@@ -5,35 +5,65 @@ APP_NAME="promptbell"
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/promptbell"
 SOUND_FILE="$STATE_DIR/sound"
+NOTIFY_MODE_FILE="$STATE_DIR/notify"
 
-KEYWORDS="allow|confirm|continue|y/n|approve"
 COOLDOWN=3
+IDLE_THRESHOLD_MS=500
 
 mkdir -p "$STATE_DIR"
 
 # ---------------------------
-# Sound handling
+# State helpers
 # ---------------------------
 
 current_sound() {
-  if [ -f "$SOUND_FILE" ]; then
-    cat "$SOUND_FILE"
-  else
-    echo "default"
-  fi
+  [ -f "$SOUND_FILE" ] && cat "$SOUND_FILE" || echo "default"
 }
 
-play_sound() {
-  SOUND="$(current_sound)"
+notify_mode() {
+  [ -f "$NOTIFY_MODE_FILE" ] && cat "$NOTIFY_MODE_FILE" || echo "background"
+}
 
-  case "$SOUND" in
+now_ms() {
+  date +%s%3N 2>/dev/null || echo $(( $(date +%s) * 1000 ))
+}
+
+# ---------------------------
+# Focus detection (best effort)
+# ---------------------------
+
+is_terminal_focused() {
+  case "$(uname)" in
+    Darwin)
+      osascript -e '
+        tell application "System Events"
+          set frontApp to name of first application process whose frontmost is true
+          frontApp contains "Terminal" or frontApp contains "iTerm"
+        end tell
+      ' 2>/dev/null | grep -q true
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+should_notify() {
+  [ "$(notify_mode)" = "always" ] && return 0
+  is_terminal_focused && return 1
+  return 0
+}
+
+# ---------------------------
+# Sound & notification
+# ---------------------------
+
+play_sound() {
+  case "$(current_sound)" in
     none) return ;;
     default)
-      if command -v afplay >/dev/null 2>&1; then
-        afplay /System/Library/Sounds/Glass.aiff &
-      elif command -v paplay >/dev/null 2>&1; then
-        paplay /usr/share/sounds/freedesktop/stereo/complete.oga &
-      fi
+      command -v afplay >/dev/null && afplay /System/Library/Sounds/Glass.aiff &
+      command -v paplay >/dev/null && paplay /usr/share/sounds/freedesktop/stereo/complete.oga &
       ;;
     glass) afplay /System/Library/Sounds/Glass.aiff & ;;
     ping)  afplay /System/Library/Sounds/Ping.aiff & ;;
@@ -42,53 +72,49 @@ play_sound() {
   esac
 }
 
-notify() {
-  if command -v osascript >/dev/null 2>&1; then
-    osascript -e 'display notification "A command needs your attention" with title "promptbell"' &
-  elif command -v notify-send >/dev/null 2>&1; then
-    notify-send "promptbell" "A command needs your attention" &
-  fi
-}
-
-alert() {
-  now=$(date +%s)
-  if [ $((now - LAST_ALERT)) -lt "$COOLDOWN" ]; then
-    return
-  fi
-
-  LAST_ALERT="$now"
-  play_sound
-  notify
+send_notification() {
+  command -v osascript >/dev/null && \
+    osascript -e 'display notification "User attention needed" with title "promptbell"' &
+  command -v notify-send >/dev/null && notify-send "promptbell" "User attention needed" &
 }
 
 # ---------------------------
-# Sounds subcommand
+# Menu-based trigger detection (grouped)
 # ---------------------------
 
-sounds_list() {
-  cat <<EOF
-Available sounds:
-  default  (system default)
-  glass    (macOS)
-  ping     (macOS)
-  pop      (macOS)
-  bell     (Linux)
-  none     (disable sound)
-EOF
+LAST_ALERT=0
+LAST_OUTPUT_MS=0
+PENDING_TRIGGER=0
+
+MENU_STREAK=0
+LAST_MENU_LINE_MS=0
+MENU_MAX_GAP_MS=200
+
+is_menu_line() {
+  # Matches:
+  # 1. Option
+  # 2) Option
+  # [3] Option
+  echo "$1" | grep -Eq '^\s*(\[[0-9]+\]|[0-9]+[.)])\s+'
 }
 
-sounds_use() {
-  case "${1:-}" in
-    default|glass|ping|pop|bell|none)
-      echo "$1" >"$SOUND_FILE"
-      echo "🔔 promptbell sound set to '$1'"
-      ;;
-    *)
-      echo "Unknown sound: ${1:-}"
-      echo "Run: promptbell sounds list"
-      exit 1
-      ;;
-  esac
+try_notify_if_idle() {
+  [ "$PENDING_TRIGGER" -eq 1 ] || return
+
+  now="$(now_ms)"
+  idle_ms=$(( now - LAST_OUTPUT_MS ))
+
+  if [ "$idle_ms" -ge "$IDLE_THRESHOLD_MS" ]; then
+    should_notify || { PENDING_TRIGGER=0; return; }
+
+    if [ $((now - LAST_ALERT)) -ge $((COOLDOWN * 1000)) ]; then
+      LAST_ALERT="$now"
+      play_sound
+      send_notification
+    fi
+
+    PENDING_TRIGGER=0
+  fi
 }
 
 # ---------------------------
@@ -100,16 +126,13 @@ add_shell() {
   case "$SHELL_NAME" in
     zsh) RC="$HOME/.zshrc" ;;
     bash) RC="$HOME/.bashrc" ;;
-    *)
-      echo "Unsupported shell: $SHELL_NAME"
-      exit 1
-      ;;
+    *) echo "Unsupported shell"; exit 1 ;;
   esac
 
-  if grep -q "promptbell integration" "$RC" 2>/dev/null; then
-    echo "promptbell is already added"
+  grep -q "promptbell integration" "$RC" 2>/dev/null && {
+    echo "promptbell already added"
     exit 0
-  fi
+  }
 
   cat >>"$RC" <<'EOF'
 
@@ -134,48 +157,36 @@ codex() {
 EOF
 
   echo "✅ promptbell added to shell"
-  echo "Restart your terminal or run: source $RC"
 }
 
 remove_shell() {
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
-    [ -f "$RC" ] || continue
-    sed -i.bak '/promptbell integration (start)/,/promptbell integration (end)/d' "$RC"
+    [ -f "$RC" ] && sed -i.bak '/promptbell integration (start)/,/promptbell integration (end)/d' "$RC"
   done
-
   echo "🧹 Shell integration removed"
-  echo ""
-  echo "To completely uninstall promptbell:"
-  echo "  promptbell uninstall"
-  echo ""
-  echo "Restart your terminal to fully apply changes"
 }
 
 # ---------------------------
-# Uninstall
+# Notify mode commands
 # ---------------------------
 
-uninstall_promptbell() {
-  BIN_PATH="$(command -v promptbell || true)"
+notify_list() {
+  cat <<EOF
+Notification modes:
+  background  Notify only when terminal is not focused (default)
+  always      Always notify
+EOF
+}
 
-  if [ -z "$BIN_PATH" ]; then
-    echo "promptbell is not installed"
-    exit 1
-  fi
-
-  echo "This will remove the promptbell binary:"
-  echo "  $BIN_PATH"
-  echo ""
-  printf "Continue? [y/N]: "
-  read -r answer
-
-  case "$answer" in
-    y|Y|yes|YES)
-      rm -f "$BIN_PATH"
-      echo "🗑️  promptbell uninstalled"
+notify_use() {
+  case "${1:-}" in
+    background|always)
+      echo "$1" >"$NOTIFY_MODE_FILE"
+      echo "🔔 Notification mode set to '$1'"
       ;;
     *)
-      echo "Aborted"
+      echo "Unknown notify mode"
+      exit 1
       ;;
   esac
 }
@@ -185,78 +196,51 @@ uninstall_promptbell() {
 # ---------------------------
 
 case "${1:-}" in
-  --add)
-    add_shell
-    exit 0
-    ;;
-  --remove)
-    remove_shell
-    exit 0
-    ;;
-  uninstall)
-    uninstall_promptbell
-    exit 0
-    ;;
-  sounds)
+  --add) add_shell; exit 0 ;;
+  --remove) remove_shell; exit 0 ;;
+  notify)
     case "${2:-}" in
-      list) sounds_list ;;
-      use)  sounds_use "${3:-}" ;;
-      *)
-        echo "Usage:"
-        echo "  promptbell sounds list"
-        echo "  promptbell sounds use <name>"
-        exit 1
-        ;;
+      list) notify_list ;;
+      use) notify_use "${3:-}" ;;
+      *) echo "Usage: promptbell notify list|use <mode>" ;;
     esac
-    exit 0
-    ;;
-  --help)
-    cat <<EOF
-promptbell — notification sounds for CLI-based AI coding assistants
-
-Usage:
-  promptbell <command> [args...]
-  promptbell --add
-  promptbell --remove
-  promptbell uninstall
-  promptbell sounds list
-  promptbell sounds use <name>
-  promptbell --help
-
-Description:
-  promptbell plays notification sounds for CLI-based AI coding
-  assistants (like gemini and codex) when user attention is needed.
-
-Install / Remove:
-  --add        Add promptbell to your shell (automatic notifications)
-  --remove     Remove shell integration (keeps binary)
-  uninstall    Remove the promptbell binary from your system
-EOF
     exit 0
     ;;
 esac
 
 # ---------------------------
-# Command wrapper (PTY-aware)
+# Command wrapper (PTY)
 # ---------------------------
 
-if [ "$#" -eq 0 ]; then
-  echo "Usage: promptbell <command> [args...]"
-  exit 1
-fi
+[ "$#" -eq 0 ] && { echo "Usage: promptbell <command>"; exit 1; }
 
-LAST_ALERT=0
+run_loop() {
+  while IFS= read -r line; do
+    printf '%s\n' "$line"
+    LAST_OUTPUT_MS="$(now_ms)"
+
+    if is_menu_line "$line"; then
+      now="$(now_ms)"
+
+      if [ $((now - LAST_MENU_LINE_MS)) -le "$MENU_MAX_GAP_MS" ]; then
+        MENU_STREAK=$((MENU_STREAK + 1))
+      else
+        MENU_STREAK=1
+      fi
+
+      LAST_MENU_LINE_MS="$now"
+
+      [ "$MENU_STREAK" -ge 2 ] && PENDING_TRIGGER=1
+    else
+      MENU_STREAK=0
+    fi
+
+    try_notify_if_idle
+  done
+}
 
 if command -v script >/dev/null 2>&1; then
-  # PTY mode — preserves rich CLI UI
-  script -q /dev/null "$@" 2>&1 | while IFS= read -r line; do
-    printf '%s\n' "$line"
-    echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
-  done
+  script -q /dev/null "$@" 2>&1 | run_loop
 else
-  # Fallback pipe mode
-  "$@" 2>&1 | while IFS= read -r line; do
-    printf '%s\n' "$line"
-    echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
-  done
+  "$@" 2>&1 | run_loop
 fi
