@@ -6,8 +6,8 @@ APP_NAME="promptbell"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/promptbell"
 SOUND_FILE="$STATE_DIR/sound"
 
-KEYWORDS="allow|confirm|continue|y/n|approve"
 COOLDOWN=3
+IDLE_THRESHOLD_MS=500
 
 mkdir -p "$STATE_DIR"
 
@@ -50,15 +50,44 @@ notify() {
   fi
 }
 
-alert() {
-  now=$(date +%s)
-  if [ $((now - LAST_ALERT)) -lt "$COOLDOWN" ]; then
-    return
-  fi
+# ---------------------------
+# Menu-based + idle alert logic
+# ---------------------------
 
-  LAST_ALERT="$now"
-  play_sound
-  notify
+LAST_ALERT=0
+LAST_OUTPUT_MS=0
+PENDING_TRIGGER=0
+
+MENU_STREAK=0
+LAST_MENU_LINE_MS=0
+MENU_MAX_GAP_MS=200
+
+now_ms() {
+  date +%s%3N 2>/dev/null || echo $(( $(date +%s) * 1000 ))
+}
+
+is_menu_line() {
+  # Matches:
+  # 1. Option
+  # 2) Option
+  # [3] Option
+  echo "$1" | grep -Eq '^\s*(\[[0-9]+\]|[0-9]+[.)])\s+'
+}
+
+alert_if_idle() {
+  [ "$PENDING_TRIGGER" -eq 1 ] || return
+
+  now="$(now_ms)"
+  idle_ms=$(( now - LAST_OUTPUT_MS ))
+
+  if [ "$idle_ms" -ge "$IDLE_THRESHOLD_MS" ]; then
+    if [ $((now - LAST_ALERT)) -ge $((COOLDOWN * 1000)) ]; then
+      LAST_ALERT="$now"
+      play_sound
+      notify
+    fi
+    PENDING_TRIGGER=0
+  fi
 }
 
 # ---------------------------
@@ -185,18 +214,9 @@ uninstall_promptbell() {
 # ---------------------------
 
 case "${1:-}" in
-  --add)
-    add_shell
-    exit 0
-    ;;
-  --remove)
-    remove_shell
-    exit 0
-    ;;
-  uninstall)
-    uninstall_promptbell
-    exit 0
-    ;;
+  --add) add_shell; exit 0 ;;
+  --remove) remove_shell; exit 0 ;;
+  uninstall) uninstall_promptbell; exit 0 ;;
   sounds)
     case "${2:-}" in
       list) sounds_list ;;
@@ -245,18 +265,32 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
-LAST_ALERT=0
+run_loop() {
+  while IFS= read -r line; do
+    printf '%s\n' "$line"
+    LAST_OUTPUT_MS="$(now_ms)"
+
+    if is_menu_line "$line"; then
+      now="$(now_ms)"
+      if [ $((now - LAST_MENU_LINE_MS)) -le "$MENU_MAX_GAP_MS" ]; then
+        MENU_STREAK=$((MENU_STREAK + 1))
+      else
+        MENU_STREAK=1
+      fi
+      LAST_MENU_LINE_MS="$now"
+      [ "$MENU_STREAK" -ge 2 ] && PENDING_TRIGGER=1
+    else
+      MENU_STREAK=0
+    fi
+
+    alert_if_idle
+  done
+}
 
 if command -v script >/dev/null 2>&1; then
   # PTY mode — preserves rich CLI UI
-  script -q /dev/null "$@" 2>&1 | while IFS= read -r line; do
-    printf '%s\n' "$line"
-    echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
-  done
+  script -q /dev/null "$@" 2>&1 | run_loop
 else
   # Fallback pipe mode
-  "$@" 2>&1 | while IFS= read -r line; do
-    printf '%s\n' "$line"
-    echo "$line" | grep -Ei "$KEYWORDS" >/dev/null 2>&1 && alert
-  done
+  "$@" 2>&1 | run_loop
 fi
