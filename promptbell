@@ -11,6 +11,11 @@ IDLE_THRESHOLD_MS=500
 
 mkdir -p "$STATE_DIR"
 
+VERSION_FILE="$(dirname "$0")/version.txt"
+
+VERSION="unknown"
+[ -f "$VERSION_FILE" ] && VERSION="$(cat "$VERSION_FILE")"
+
 # ---------------------------
 # Sound handling
 # ---------------------------
@@ -145,7 +150,7 @@ add_shell() {
 # --- promptbell integration (start) ---
 _promptbell_notice() {
   if [ -t 1 ]; then
-    printf '%s\n' "🔔 Notification sounds by promptbell. Disable or remove: promptbell --remove" >&2
+      printf '%s\n' "🔔 Notification sounds by promptbell v$VERSION. Disable or remove: promptbell --remove" >&2
   fi
 }
 
@@ -255,6 +260,15 @@ EOF
     exit 0
     ;;
 esac
+
+# ---------------------------
+# Command routing
+# ---------------------------
+
+# Shell integration calls: promptbell command <cmd> [args...]
+if [ "${1:-}" = "command" ]; then
+  shift
+fi
 
 # ---------------------------
 # Command wrapper (PTY-aware)
