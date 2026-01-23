@@ -1,7 +1,32 @@
 #!/usr/bin/env sh
 set -eu
 
+# ---------------------------
+# Internal routing marker
+# ---------------------------
+# Shell integration calls:
+#   promptbell command <real-command> [args...]
+# This MUST run before any other argument handling.
+if [ "${1:-}" = "command" ]; then
+  shift
+fi
+
 APP_NAME="promptbell"
+
+# ---------------------------
+# Version handling
+# ---------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERSION="unknown"
+
+if [ -f "$SCRIPT_DIR/version.txt" ]; then
+  VERSION="$(cat "$SCRIPT_DIR/version.txt" | tr -d '\n')"
+fi
+
+# ---------------------------
+# State
+# ---------------------------
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/promptbell"
 SOUND_FILE="$STATE_DIR/sound"
@@ -10,11 +35,6 @@ COOLDOWN=3
 IDLE_THRESHOLD_MS=500
 
 mkdir -p "$STATE_DIR"
-
-VERSION_FILE="$(dirname "$0")/version.txt"
-
-VERSION="unknown"
-[ -f "$VERSION_FILE" ] && VERSION="$(cat "$VERSION_FILE")"
 
 # ---------------------------
 # Sound handling
@@ -49,14 +69,14 @@ play_sound() {
 
 notify() {
   if command -v osascript >/dev/null 2>&1; then
-    osascript -e 'display notification "A command needs your attention" with title "promptbell"' &
+    osascript -e 'display notification "User attention needed" with title "promptbell"' &
   elif command -v notify-send >/dev/null 2>&1; then
-    notify-send "promptbell" "A command needs your attention" &
+    notify-send "promptbell" "User attention needed" &
   fi
 }
 
 # ---------------------------
-# Menu-based + idle alert logic
+# Menu + idle detection
 # ---------------------------
 
 LAST_ALERT=0
@@ -73,9 +93,9 @@ now_ms() {
 
 is_menu_line() {
   # Matches:
-  # 1. Option
-  # 2) Option
-  # [3] Option
+  #   1. Option
+  #   2) Option
+  #   [3] Option
   echo "$1" | grep -Eq '^\s*(\[[0-9]+\]|[0-9]+[.)])\s+'
 }
 
@@ -130,9 +150,9 @@ sounds_use() {
 # ---------------------------
 
 add_shell() {
-  SHELL_NAME=$(basename "${SHELL:-}")
+  SHELL_NAME="$(basename "${SHELL:-}")"
   case "$SHELL_NAME" in
-    zsh) RC="$HOME/.zshrc" ;;
+    zsh)  RC="$HOME/.zshrc" ;;
     bash) RC="$HOME/.bashrc" ;;
     *)
       echo "Unsupported shell: $SHELL_NAME"
@@ -145,23 +165,23 @@ add_shell() {
     exit 0
   fi
 
-  cat >>"$RC" <<'EOF'
+  cat >>"$RC" <<EOF
 
 # --- promptbell integration (start) ---
 _promptbell_notice() {
   if [ -t 1 ]; then
-      printf '%s\n' "🔔 Notification sounds by promptbell v$VERSION. Disable or remove: promptbell --remove" >&2
+    printf '%s\n' "🔔 Notification sounds by promptbell v$VERSION. Disable or remove: promptbell --remove" >&2
   fi
 }
 
 gemini() {
   _promptbell_notice
-  promptbell command gemini "$@"
+  promptbell command gemini "\$@"
 }
 
 codex() {
   _promptbell_notice
-  promptbell command codex "$@"
+  promptbell command codex "\$@"
 }
 # --- promptbell integration (end) ---
 
@@ -181,8 +201,6 @@ remove_shell() {
   echo ""
   echo "To completely uninstall promptbell:"
   echo "  promptbell uninstall"
-  echo ""
-  echo "Restart your terminal to fully apply changes"
 }
 
 # ---------------------------
@@ -199,7 +217,6 @@ uninstall_promptbell() {
 
   echo "This will remove the promptbell binary:"
   echo "  $BIN_PATH"
-  echo ""
   printf "Continue? [y/N]: "
   read -r answer
 
@@ -219,9 +236,9 @@ uninstall_promptbell() {
 # ---------------------------
 
 case "${1:-}" in
-  --add) add_shell; exit 0 ;;
-  --remove) remove_shell; exit 0 ;;
-  uninstall) uninstall_promptbell; exit 0 ;;
+  --add)       add_shell; exit 0 ;;
+  --remove)    remove_shell; exit 0 ;;
+  uninstall)   uninstall_promptbell; exit 0 ;;
   sounds)
     case "${2:-}" in
       list) sounds_list ;;
@@ -260,15 +277,6 @@ EOF
     exit 0
     ;;
 esac
-
-# ---------------------------
-# Command routing
-# ---------------------------
-
-# Shell integration calls: promptbell command <cmd> [args...]
-if [ "${1:-}" = "command" ]; then
-  shift
-fi
 
 # ---------------------------
 # Command wrapper (PTY-aware)
