@@ -289,7 +289,9 @@ fi
 
 run_loop() {
   while IFS= read -r line; do
-    printf '%s\n' "$line"
+    if [ "${ECHO_OUTPUT:-1}" -eq 1 ]; then
+      printf '%s\n' "$line"
+    fi
     LAST_OUTPUT_MS="$(now_ms)"
 
     if is_menu_line "$line"; then
@@ -309,10 +311,35 @@ run_loop() {
   done
 }
 
-if command -v script >/dev/null 2>&1; then
-  # PTY mode — preserves rich CLI UI
-  script -q /dev/null "$@" 2>&1 | run_loop
-else
-  # Fallback pipe mode
-  "$@" 2>&1 | run_loop
-fi
+run_with_parser() {
+  if command -v mkfifo >/dev/null 2>&1; then
+    PIPE_PATH="$STATE_DIR/stream.$$"
+    if mkfifo "$PIPE_PATH" 2>/dev/null; then
+      # Tee keeps interactive output flowing even when parsing waits on newlines.
+      ECHO_OUTPUT=0 run_loop <"$PIPE_PATH" &
+      PARSER_PID=$!
+      if command -v script >/dev/null 2>&1; then
+        # PTY mode — preserves rich CLI UI
+        script -q /dev/null "$@" 2>&1 | tee "$PIPE_PATH"
+      else
+        # Fallback pipe mode
+        "$@" 2>&1 | tee "$PIPE_PATH"
+      fi
+      CMD_STATUS=$?
+      wait "$PARSER_PID" 2>/dev/null || true
+      rm -f "$PIPE_PATH"
+      return "$CMD_STATUS"
+    fi
+  fi
+
+  # Fallback when mkfifo is unavailable.
+  if command -v script >/dev/null 2>&1; then
+    # PTY mode — preserves rich CLI UI
+    script -q /dev/null "$@" 2>&1 | run_loop
+  else
+    # Fallback pipe mode
+    "$@" 2>&1 | run_loop
+  fi
+}
+
+run_with_parser "$@"
