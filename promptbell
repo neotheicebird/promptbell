@@ -124,11 +124,6 @@ gemini() {
   _promptbell_notice
   promptbell command gemini "$@"
 }
-
-codex() {
-  _promptbell_notice
-  promptbell command codex "$@"
-}
 # --- promptbell integration (end) ---
 
 EOF

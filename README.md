@@ -3,7 +3,7 @@
 **promptbell** adds notification sounds to CLI-based AI coding assistants  
 when user attention is needed.
 
-It’s designed for tools like **Gemini** and **Codex**, where commands may
+It’s designed for tools like **Gemini**, where commands may
 pause and wait for confirmation while you’re doing other things.
 
 No daemons. No background services. Just a small, readable shell script.
@@ -34,7 +34,6 @@ After installation, just run:
 
 ```bash
 gemini
-codex
 ```
 
 You’ll hear a notification sound when user attention is needed.
